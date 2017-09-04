@@ -27,7 +27,10 @@ def get_assumed_credentials(account_id, role_name):
     return assumedRoleObject['Credentials']
 
 
-def get_ec2_client(credentials, region):
+def get_ec2_client_by_assumed_role(account_id, role_name, region):
+    # Get credentials
+    credentials = get_assumed_credentials(account_id, role_name)
+
     # Create boto3 client by using assumed credentials from sts
     return boto3.client(
         'ec2',
@@ -36,6 +39,11 @@ def get_ec2_client(credentials, region):
         aws_secret_access_key=credentials['SecretAccessKey'],
         aws_session_token=credentials['SessionToken'],
     )
+
+
+def get_ec2_client_by_profile_name(profile_name, region):
+    # Create boto3 client by using profle name
+    return boto3.Session(profile_name=profile_name).client('ec2', region_name=region)
 
 
 def get_regions(client):
@@ -58,57 +66,80 @@ def get_availibity_zones(client):
 
 
 def get_reserved_instances_offering_id(client, availability_zone):
-    response = client.describe_reserved_instances_offerings(
-        AvailabilityZone=availability_zone,
-        IncludeMarketplace=False,
-        MaxResults=1,
-    )
+    try:
+        response = client.describe_reserved_instances_offerings(
+            AvailabilityZone=availability_zone,
+            IncludeMarketplace=False,
+            MaxResults=1,
+        )
 
-    offerings = response['ReservedInstancesOfferings']
+        offerings = response['ReservedInstancesOfferings']
 
-    if len(offerings) == 0:
-        return None
+        if len(offerings) == 0:
+            return ''
 
-    return offerings[0]['ReservedInstancesOfferingId']
+        return offerings[0]['ReservedInstancesOfferingId']
+    except:
+        return ''
 
 
 def get_availability_zone_of_reserved_instance_offering(client, offering_id):
-    response = client.describe_reserved_instances_offerings(
-        ReservedInstancesOfferingIds=[
-            offering_id
-        ],
-        MaxResults=1,
-    )
+    try:
+        response = client.describe_reserved_instances_offerings(
+            ReservedInstancesOfferingIds=[
+                offering_id
+            ],
+            MaxResults=1,
+        )
 
-    offerings = response['ReservedInstancesOfferings']
+        offerings = response['ReservedInstancesOfferings']
 
-    if len(offerings) == 0:
-        return None
+        if len(offerings) == 0:
+            return ''
 
-    return offerings[0]['AvailabilityZone']
+        return offerings[0]['AvailabilityZone']
+    except:
+        return ''
 
 
 def main():
-    role_name = get_input('Role name', 'Administrator')
-    account_ids = get_input('Account IDs', '').split(',')
+    choice_input = raw_input(
+        'Which kind of credentials would you like to use? [Default: 1]\n'
+        '1. A list of profiles that I\'ve specified in ~/.aws/\n'
+        '2. A single role name that I\'ve created in multiple accounts\n'
+    ) or '1'
 
-    if account_ids[0] == '':
-        raise Exception('No account id specified')
+    if choice_input == '1':
+        accounts_input = raw_input('What are the names of these profiles?\n') or ''
 
+        def get_ec2_client(account, region):
+            return get_ec2_client_by_profile_name(account, region)
+
+    elif choice_input == '2':
+        role_name = raw_input('What is the name of this role? [Default: Administrator]\n') or 'Administrator'
+        accounts_input = raw_input('What are the account IDs of these accounts?\n') or ''
+
+        def get_ec2_client(account, region):
+            return get_ec2_client_by_assumed_role(account, role_name, region)
+
+    else:
+        raise Exception('Invalid choice')
+
+    accounts = accounts_input.split(',')
+
+    if len(accounts) < 2:
+        raise Exception('This is only interesting for multiple accounts. Please specify multiple accounts.')
 
     # Separate first account from the rest
-    first_account_id, account_ids = account_ids[0], account_ids[1:]
-
-    # Assume role in account
-    credentials = get_assumed_credentials(first_account_id, role_name)
+    first_account, accounts = accounts[0], accounts[1:]
 
     # Get a list of all regions
-    client = get_ec2_client(credentials, 'us-east-1')
-    regions = get_regions(client)
+    client = get_ec2_client(first_account, 'us-east-1')
+    regions = sorted(get_regions(client))[::-1]
 
     for region in regions:
         # Get AZs for specific region
-        client = get_ec2_client(credentials, region)
+        client = get_ec2_client(first_account, region)
         availability_zones = get_availibity_zones(client)
 
         for availability_zone in availability_zones:
@@ -117,20 +148,21 @@ def main():
             if offering_id:
                 # Write output
                 sys.stdout.write('\n' + offering_id + '\n')
-                sys.stdout.write('-------------+-------------------\n')
-                sys.stdout.write(first_account_id + ' | ' + availability_zone + '\n')
+                sys.stdout.write('---------------------------------\n')
+                sys.stdout.write(first_account + ' | ' + availability_zone + '\n')
 
-                for account_id in account_ids:
-                    credentials = get_assumed_credentials(account_id, role_name)
-                    client = get_ec2_client(credentials, region)
+                for account in accounts:
+                    client = get_ec2_client(account, region)
                     availability_zone = get_availability_zone_of_reserved_instance_offering(client, offering_id)
 
                     # Write output
-                    sys.stdout.write(account_id + ' | ' + availability_zone + '\n')
+                    sys.stdout.write(account + ' | ' + availability_zone + '\n')
 
                 # Write output
-                sys.stdout.write('-------------+-------------------\n')
+                sys.stdout.write('---------------------------------\n')
                 sys.stdout.flush()
+            else:
+                sys.stdout.write('\nNo reservered instance offering for ' + first_account + ' in ' + availability_zone + '\n')
 
 if __name__ == '__main__':
     main()
