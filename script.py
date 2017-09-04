@@ -135,7 +135,7 @@ def main():
 
     # Get a list of all regions
     client = get_ec2_client(first_account, 'us-east-1')
-    regions = sorted(get_regions(client))[::-1]
+    regions = sorted(get_regions(client))
 
     for region in regions:
         # Get AZs for specific region
