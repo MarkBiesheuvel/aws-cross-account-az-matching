@@ -42,7 +42,7 @@ def get_ec2_client_by_assumed_role(account_id, role_name, region):
 
 
 def get_ec2_client_by_profile_name(profile_name, region):
-    # Create boto3 client by using profle name
+    # Create boto3 client by using a profile name
     return boto3.Session(profile_name=profile_name).client('ec2', region_name=region)
 
 
@@ -51,7 +51,7 @@ def get_regions(client):
     return map(lambda region: region['RegionName'], response['Regions'])
 
 
-def get_availibity_zones(client):
+def get_availabity_zones(client):
     response = client.describe_availability_zones(
         Filters=[
             {
@@ -105,8 +105,9 @@ def get_availability_zone_of_reserved_instance_offering(client, offering_id):
 def main():
     choice_input = raw_input(
         'Which kind of credentials would you like to use? [Default: 1]\n'
-        '1. A list of profiles that I\'ve specified in ~/.aws/\n'
+        '1. A comma-separated list of profiles that are all configured in ~/.aws/\n'
         '2. A single role name that I\'ve created in multiple accounts\n'
+        '3. A list made up of all configured profiles in ~/.aws/\n'
     ) or '1'
 
     if choice_input == '1':
@@ -122,10 +123,18 @@ def main():
         def get_ec2_client(account, region):
             return get_ec2_client_by_assumed_role(account, role_name, region)
 
+    elif choice_input == '3':
+        session = boto3.Session()
+        accounts_input = ','.join(session.available_profiles)
+
+        def get_ec2_client(account, region):
+            return get_ec2_client_by_profile_name(account, region)
+
     else:
         raise Exception('Invalid choice')
 
-    accounts = accounts_input.split(',')
+    # Remove leading and trailing spaces from account names, just in case
+    accounts = map(str.strip, accounts_input.split(','))
 
     if len(accounts) < 2:
         raise Exception('This is only interesting for multiple accounts. Please specify multiple accounts.')
@@ -139,12 +148,12 @@ def main():
 
     for region in regions:
         # Get AZs for specific region
-        client = get_ec2_client(first_account, region)
-        availability_zones = get_availibity_zones(client)
+        first_client = get_ec2_client(first_account, region)
+        availability_zones = get_availabity_zones(first_client)
 
         for availability_zone in availability_zones:
-            # Get offering ID for first account and find it in the other accounts
-            offering_id = get_reserved_instances_offering_id(client, availability_zone)
+            # Get offering ID for the first offering of the first account and find it in the other accounts
+            offering_id = get_reserved_instances_offering_id(first_client, availability_zone)
             if offering_id:
                 # Write output
                 sys.stdout.write('\n' + offering_id + '\n')
@@ -162,7 +171,7 @@ def main():
                 sys.stdout.write('---------------------------------\n')
                 sys.stdout.flush()
             else:
-                sys.stdout.write('\nNo reservered instance offering for ' + first_account + ' in ' + availability_zone + '\n')
+                sys.stdout.write('\nNo reserved instance offering for ' + first_account + ' in ' + availability_zone + '\n')
 
 if __name__ == '__main__':
     main()
