@@ -3,6 +3,10 @@ import botocore
 import boto3
 import sys
 
+# Search for reserved instances for this instance type.  Not all AZs have instances of
+# every instance type available for reservation.  By picking a very common type, we sidestep
+# that problem.  Other instance types (like m4.* or m5.*) aren't available in every AZ.
+instance_type = 't2.large'
 
 def get_input(description, default_value):
     # Ask user for input or fall back to default value
@@ -70,6 +74,7 @@ def get_reserved_instances_offering_id(client, availability_zone):
         response = client.describe_reserved_instances_offerings(
             AvailabilityZone=availability_zone,
             IncludeMarketplace=False,
+            InstanceType=instance_type,
             MaxResults=1,
         )
 
