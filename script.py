@@ -3,10 +3,12 @@ import botocore
 import boto3
 import sys
 
+
 # Search for reserved instances for this instance type.  Not all AZs have instances of
 # every instance type available for reservation.  By picking a very common type, we sidestep
 # that problem.  Other instance types (like m4.* or m5.*) aren't available in every AZ.
 instance_type = 't2.large'
+
 
 def get_input(description, default_value):
     # Ask user for input or fall back to default value
@@ -156,27 +158,47 @@ def main():
         first_client = get_ec2_client(first_account, region)
         availability_zones = get_availabity_zones(first_client)
 
+        # Initialize our dictionary of lists for the current region
+        azdict = {}
+        azdict[first_account] = []
+        for account in accounts:
+            azdict[account] = []
+
         for availability_zone in availability_zones:
+            azdict[first_account].append(availability_zone[-1:])
+
             # Get offering ID for the first offering of the first account and find it in the other accounts
             offering_id = get_reserved_instances_offering_id(first_client, availability_zone)
             if offering_id:
                 # Write output
-                sys.stdout.write('\n' + offering_id + '\n')
-                sys.stdout.write('---------------------------------\n')
-                sys.stdout.write(first_account + ' | ' + availability_zone + '\n')
+                #sys.stdout.write('\n' + offering_id + '\n')
+                #sys.stdout.write('---------------------------------\n')
+                #sys.stdout.write(first_account + ' | ' + availability_zone + '\n')
 
                 for account in accounts:
                     client = get_ec2_client(account, region)
-                    availability_zone = get_availability_zone_of_reserved_instance_offering(client, offering_id)
+                    az2 = get_availability_zone_of_reserved_instance_offering(client, offering_id)
+
+                    azdict[account].append(az2[-1:] if len(az2) > 0 else ' ')
 
                     # Write output
-                    sys.stdout.write(account + ' | ' + availability_zone + '\n')
+                    #sys.stdout.write(account + ' | ' + az2 + '\n')
 
                 # Write output
-                sys.stdout.write('---------------------------------\n')
-                sys.stdout.flush()
+                #sys.stdout.write('---------------------------------\n')
+                #sys.stdout.flush()
             else:
                 sys.stdout.write('\nNo reserved instance offering for ' + first_account + ' in ' + availability_zone + '\n')
+
+        # Dump output for this availability zone
+        sys.stdout.write('\n\nMapping for region ' + region + '\n---------------------------------\n')
+        maxlen = len(max(azdict.keys(), key=len))
+        for key in azdict:
+            mylist = '  '.join(azdict[key])
+            if (len(mylist.strip()) > 0):
+                sys.stdout.write("{0:{1}} - {2}\n".format(key, maxlen, mylist))
+        sys.stdout.write('---------------------------------\n')
+        sys.stdout.flush()
 
 if __name__ == '__main__':
     main()
