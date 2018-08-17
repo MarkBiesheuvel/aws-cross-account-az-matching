@@ -1,115 +1,118 @@
 #!/bin/python
-import botocore
 import boto3
-import sys
-
 
 # Search for reserved instances for this instance type.  Not all AZs have instances of
 # every instance type available for reservation.  By picking a very common type, we sidestep
 # that problem.  Other instance types (like m4.* or m5.*) aren't available in every AZ.
-instance_type = 't2.large'
+INSTANCE_TYPE = 't2.large'
 
 
-def get_input(description, default_value):
-    # Ask user for input or fall back to default value
-    return raw_input('%s [%s]:' % (description, default_value)) \
-        or default_value
+class Account:
 
+    def __init__(self, account_id=None, role_name=None, profile_name=None):
+        if profile_name is not None:
+            self.initialize_by_profile_name(profile_name)
+        elif account_id is not None and role_name is not None:
+            self.initialize_by_assume_role(account_id, role_name)
+        else:
+            raise Exception('Missing parameters for Account')
 
-def get_assumed_credentials(account_id, role_name):
-    # Create an STS client object that represents a live connection to the
-    # STS service.
-    sts_client = boto3.client('sts')
+    def initialize_by_profile_name(self, profile_name):
+        # Store account name
+        self.name = profile_name
 
-    # Call the assume_role method of the STSConnection object and pass the role
-    # ARN and a role session name.
-    assumedRoleObject = sts_client.assume_role(
-        RoleArn='arn:aws:iam::%s:role/%s' % (account_id, role_name),
-        RoleSessionName='session'
-    )
+        # Create boto3 client by using a profile name
+        self.session = boto3.Session(profile_name=profile_name)
 
-    # From the response that contains the assumed role, get the temporary
-    # credentials that can be used to make subsequent API calls.
-    return assumedRoleObject['Credentials']
+    def initialize_by_assume_role(self, account_id, role_name):
+        # Store account name
+        self.name = account_id
 
+        # Create an STS client object that represents a live connection to the
+        # STS service.
+        client = boto3.client('sts')
 
-def get_ec2_client_by_assumed_role(account_id, role_name, region):
-    # Get credentials
-    credentials = get_assumed_credentials(account_id, role_name)
+        # Call the assume_role method of the STSConnection object and pass the role
+        # ARN and a role session name.
+        response = client.assume_role(
+            RoleArn='arn:aws:iam::%{}:role/{}'.format(account_id, role_name),
+            RoleSessionName='session'
+        )
 
-    # Create boto3 client by using assumed credentials from sts
-    return boto3.client(
-        'ec2',
-        region_name=region,
-        aws_access_key_id=credentials['AccessKeyId'],
-        aws_secret_access_key=credentials['SecretAccessKey'],
-        aws_session_token=credentials['SessionToken'],
-    )
+        credentials = response['Credentials']
 
+        # Create boto3 client by using assumed credentials from sts
+        self.session = boto3.Session(
+            aws_access_key_id=credentials['AccessKeyId'],
+            aws_secret_access_key=credentials['SecretAccessKey'],
+            aws_session_token=credentials['SessionToken'],
+        )
 
-def get_ec2_client_by_profile_name(profile_name, region):
-    # Create boto3 client by using a profile name
-    return boto3.Session(profile_name=profile_name).client('ec2', region_name=region)
+    def get_ec2_client(self, region):
+        return self.session.client('ec2', region_name=region)
 
-
-def get_regions(client):
-    response = client.describe_regions()
-    return map(lambda region: region['RegionName'], response['Regions'])
-
-
-def get_availabity_zones(client):
-    response = client.describe_availability_zones(
-        Filters=[
-            {
-                'Name': 'state',
-                'Values': [
-                    'available'
-                ]
-            }
+    def get_regions(self):
+        response = self.get_ec2_client('us-east-1').describe_regions()
+        regions = [
+            region['RegionName']
+            for region in response['Regions']
         ]
-    )
-    return map(lambda az: az['ZoneName'], response['AvailabilityZones'])
+        return sorted(regions)
 
-
-def get_reserved_instances_offering_id(client, availability_zone):
-    try:
-        response = client.describe_reserved_instances_offerings(
-            AvailabilityZone=availability_zone,
-            IncludeMarketplace=False,
-            InstanceType=instance_type,
-            MaxResults=1,
+    def get_availabity_zones(self, region):
+        response = self.get_ec2_client(region).describe_availability_zones(
+            Filters=[
+                {
+                    'Name': 'state',
+                    'Values': [
+                        'available'
+                    ]
+                }
+            ]
         )
+        return [
+            az['ZoneName']
+            for az in response['AvailabilityZones']
+        ]
 
-        offerings = response['ReservedInstancesOfferings']
+    def get_reserved_instances_offering_id(self, region, availability_zone):
+        try:
+            response = self.get_ec2_client(region).describe_reserved_instances_offerings(
+                AvailabilityZone=availability_zone,
+                IncludeMarketplace=False,
+                InstanceType=INSTANCE_TYPE,
+                MaxResults=1,
+            )
 
-        if len(offerings) == 0:
-            return ''
+            offerings = response['ReservedInstancesOfferings']
 
-        return offerings[0]['ReservedInstancesOfferingId']
-    except:
-        return ''
+            if len(offerings) == 0:
+                return None
+
+            return offerings[0]['ReservedInstancesOfferingId']
+        except:
+            return None
+
+    def get_availability_zone_of_reserved_instance_offering(self, region, offering_id):
+        try:
+            response = self.get_ec2_client(region).describe_reserved_instances_offerings(
+                ReservedInstancesOfferingIds=[
+                    offering_id
+                ],
+                MaxResults=1,
+            )
+
+            offerings = response['ReservedInstancesOfferings']
+
+            if len(offerings) == 0:
+                return None
+
+            return offerings[0]['AvailabilityZone']
+        except:
+            return None
 
 
-def get_availability_zone_of_reserved_instance_offering(client, offering_id):
-    try:
-        response = client.describe_reserved_instances_offerings(
-            ReservedInstancesOfferingIds=[
-                offering_id
-            ],
-            MaxResults=1,
-        )
-
-        offerings = response['ReservedInstancesOfferings']
-
-        if len(offerings) == 0:
-            return ''
-
-        return offerings[0]['AvailabilityZone']
-    except:
-        return ''
-
-
-def main():
+def get_accounts_from_input():
     choice_input = raw_input(
         'Which kind of credentials would you like to use? [Default: 1]\n'
         '1. A comma-separated list of profiles that are all configured in ~/.aws/\n'
@@ -118,87 +121,112 @@ def main():
     ) or '1'
 
     if choice_input == '1':
-        accounts_input = raw_input('What are the names of these profiles?\n') or ''
+        profiles = raw_input('What are the names of these profiles?\n') or ''
 
-        def get_ec2_client(account, region):
-            return get_ec2_client_by_profile_name(account, region)
+        # Remove leading and trailing spaces from account names, just in case
+        profiles = [
+            profile.strip()
+            for profile in profiles.split(',')
+        ]
+
+        # Map profiles to sessions
+        return [
+            Account(profile_name=profile)
+            for profile in profiles
+        ]
 
     elif choice_input == '2':
         role_name = raw_input('What is the name of this role? [Default: Administrator]\n') or 'Administrator'
-        accounts_input = raw_input('What are the account IDs of these accounts?\n') or ''
+        account_ids = raw_input('What are the account IDs of these accounts?\n') or ''
 
-        def get_ec2_client(account, region):
-            return get_ec2_client_by_assumed_role(account, role_name, region)
+        # Remove leading and trailing spaces from account names, just in case
+        account_ids = [
+            account_id.strip()
+            for account_id in account_ids.split(',')
+        ]
+
+        # Map accounts to sessions by assuming role into the accounts
+        return [
+            Account(account_id=account_id, role_name=role_name)
+            for account_id in account_ids
+        ]
 
     elif choice_input == '3':
         session = boto3.Session()
-        accounts_input = ','.join(session.available_profiles)
 
-        def get_ec2_client(account, region):
-            return get_ec2_client_by_profile_name(account, region)
-
+        # Map profiles to sessions
+        return [
+            Account(profile_name=profile)
+            for profile in session.available_profiles
+        ]
     else:
         raise Exception('Invalid choice')
 
-    # Remove leading and trailing spaces from account names, just in case
-    accounts = map(str.strip, accounts_input.split(','))
+
+def print_dictionary(region, az_dictionary, max_account_name_length):
+    seperator = '+-{}-+{}'.format(
+        '-' * max_account_name_length,
+        '---+' * len(az_dictionary.values()[0]),
+    )
+
+    # Dump output for this region
+    print('Mapping for region {}'.format(region))
+    print(seperator)
+
+    for account_name in az_dictionary:
+        azs = az_dictionary[account_name]
+        print('| {0:{1}} | {2} |'.format(
+            account_name,
+            max_account_name_length,
+            ' | '.join(azs),
+        ))
+
+    print(seperator)
+    print('')
+
+
+def main():
+    accounts = get_accounts_from_input()
+
+    # Create newline after input
+    print('')
 
     if len(accounts) < 2:
         raise Exception('This is only interesting for multiple accounts. Please specify multiple accounts.')
 
     # Separate first account from the rest
-    first_account, accounts = accounts[0], accounts[1:]
+    first_account, other_accounts = accounts[0], accounts[1:]
+
+    # Calculcate the longest account name
+    max_account_name_length = max([len(account.name) for account in accounts])
 
     # Get a list of all regions
-    client = get_ec2_client(first_account, 'us-east-1')
-    regions = sorted(get_regions(client))
+    regions = first_account.get_regions()
 
     for region in regions:
         # Get AZs for specific region
-        first_client = get_ec2_client(first_account, region)
-        availability_zones = get_availabity_zones(first_client)
+        availability_zones = first_account.get_availabity_zones(region)
 
         # Initialize our dictionary of lists for the current region
-        azdict = {}
-        azdict[first_account] = []
-        for account in accounts:
-            azdict[account] = []
+        az_dictionary = {
+            account.name: []
+            for account in accounts
+        }
 
         for availability_zone in availability_zones:
-            azdict[first_account].append(availability_zone[-1:])
+            az_dictionary[first_account.name].append(availability_zone[-1:])
 
             # Get offering ID for the first offering of the first account and find it in the other accounts
-            offering_id = get_reserved_instances_offering_id(first_client, availability_zone)
-            if offering_id:
-                # Write output
-                #sys.stdout.write('\n' + offering_id + '\n')
-                #sys.stdout.write('---------------------------------\n')
-                #sys.stdout.write(first_account + ' | ' + availability_zone + '\n')
+            offering_id = first_account.get_reserved_instances_offering_id(region, availability_zone)
 
-                for account in accounts:
-                    client = get_ec2_client(account, region)
-                    az2 = get_availability_zone_of_reserved_instance_offering(client, offering_id)
+            if offering_id is not None:
+                for other_account in other_accounts:
+                    az2 = other_account.get_availability_zone_of_reserved_instance_offering(region, offering_id)
 
-                    azdict[account].append(az2[-1:] if len(az2) > 0 else ' ')
+                    az_dictionary[other_account.name].append(az2[-1:] if az2 is not None else '?')
 
-                    # Write output
-                    #sys.stdout.write(account + ' | ' + az2 + '\n')
+        print_dictionary(region, az_dictionary, max_account_name_length)
 
-                # Write output
-                #sys.stdout.write('---------------------------------\n')
-                #sys.stdout.flush()
-            else:
-                sys.stdout.write('\nNo reserved instance offering for ' + first_account + ' in ' + availability_zone + '\n')
-
-        # Dump output for this availability zone
-        sys.stdout.write('\n\nMapping for region ' + region + '\n---------------------------------\n')
-        maxlen = len(max(azdict.keys(), key=len))
-        for key in azdict:
-            mylist = '  '.join(azdict[key])
-            if (len(mylist.strip()) > 0):
-                sys.stdout.write("{0:{1}} - {2}\n".format(key, maxlen, mylist))
-        sys.stdout.write('---------------------------------\n')
-        sys.stdout.flush()
 
 if __name__ == '__main__':
     main()
