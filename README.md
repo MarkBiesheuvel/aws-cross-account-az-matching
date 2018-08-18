@@ -21,26 +21,20 @@ Then the script will iterate over each availability zone in each region and sear
 All of this is written to `stdout` and looks something like this:
 
 ```
-05aae661-3154-4a28-97b0-dd87f6a53531
--------------+-------------------
-111111111111 | ap-southeast-2a
-222222222222 | ap-southeast-2b
-333333333333 | ap-southeast-2a
--------------+-------------------
+Mapping for region eu-central-1
++-----------------+---+---+---+
+| xxxxxxxxxxxxx   | a | b | c |
+| yyyyyyyyyyyyyyy | a | b | c |
+| zzzzzzzzzzzzz   | a | b | c |
++-----------------+---+---+---+
 
-9b301a8b-f779-48fa-b2d3-140ed499b7e2
--------------+-------------------
-111111111111 | ap-southeast-2b
-222222222222 | ap-southeast-2a
-333333333333 | ap-southeast-2b
--------------+-------------------
-
-1ab91146-23f5-404b-833e-c46a1fbc2805
--------------+-------------------
-111111111111 | ap-southeast-2c
-222222222222 | ap-southeast-2c
-333333333333 | ap-southeast-2c
--------------+-------------------
+Mapping for region eu-west-1
++-----------------+---+---+---+
+| xxxxxxxxxxxxx   | a | b | c |
+| yyyyyyyyyyyyyyy | b | c | a |
+| zzzzzzzzzzzzz   | c | a | b |
++-----------------+---+---+---+
 ```
 
-As you can see in the Sydney region availability zone `c` is the same across all 3 accounts, but account `222222222222` has available zone `a` and `b` switched around.
+In the Frankfurt region (`eu-central-1`) the letter `a`, `b`, and `c` all map to the same AZ accross the three example accounts.
+In the Ireland region (`eu-west-1`) the letter `a` in account `xxxxxxxxxxxxx` is the same AZ is letter `b` in account `yyyyyyyyyyyyyyy` and `c` in account `zzzzzzzzzzzzz`.
