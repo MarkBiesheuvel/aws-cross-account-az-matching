@@ -1,10 +1,16 @@
 #!/bin/python
 import boto3
+import json
 
 # Search for reserved instances for this instance type.  Not all AZs have instances of
 # every instance type available for reservation.  By picking a very common type, we sidestep
 # that problem.  Other instance types (like m4.* or m5.*) aren't available in every AZ.
 INSTANCE_TYPE = 't2.large'
+INSTANCE_TENANCY = 'default'
+OFFERING_CLASS = 'standard'
+OFFERING_TYPE = 'All Upfront'
+PRODUCT_DESCRIPTION = 'Linux/UNIX (Amazon VPC)'
+DURATION = 94608000
 
 
 class Account:
@@ -59,57 +65,23 @@ class Account:
         ]
         return sorted(regions)
 
-    def get_availabity_zones(self, region):
-        response = self.get_ec2_client(region).describe_availability_zones(
-            Filters=[
-                {
-                    'Name': 'state',
-                    'Values': [
-                        'available'
-                    ]
-                }
-            ]
+    def get_reserved_instances_offerings(self, region):
+        response = self.get_ec2_client(region).describe_reserved_instances_offerings(
+            IncludeMarketplace=False,
+            InstanceType=INSTANCE_TYPE,
+            InstanceTenancy=INSTANCE_TENANCY,
+            MinDuration=DURATION,
+            MaxDuration=DURATION,
+            OfferingClass=OFFERING_CLASS,
+            OfferingType=OFFERING_TYPE,
+            ProductDescription=PRODUCT_DESCRIPTION,
         )
-        return [
-            az['ZoneName']
-            for az in response['AvailabilityZones']
-        ]
 
-    def get_reserved_instances_offering_id(self, region, availability_zone):
-        try:
-            response = self.get_ec2_client(region).describe_reserved_instances_offerings(
-                AvailabilityZone=availability_zone,
-                IncludeMarketplace=False,
-                InstanceType=INSTANCE_TYPE,
-                MaxResults=1,
-            )
-
-            offerings = response['ReservedInstancesOfferings']
-
-            if len(offerings) == 0:
-                return None
-
-            return offerings[0]['ReservedInstancesOfferingId']
-        except:
-            return None
-
-    def get_availability_zone_of_reserved_instance_offering(self, region, offering_id):
-        try:
-            response = self.get_ec2_client(region).describe_reserved_instances_offerings(
-                ReservedInstancesOfferingIds=[
-                    offering_id
-                ],
-                MaxResults=1,
-            )
-
-            offerings = response['ReservedInstancesOfferings']
-
-            if len(offerings) == 0:
-                return None
-
-            return offerings[0]['AvailabilityZone']
-        except:
-            return None
+        return {
+            offering['ReservedInstancesOfferingId']: offering['AvailabilityZone'][-1:]
+            for offering in response['ReservedInstancesOfferings']
+            if 'AvailabilityZone' in offering
+        }
 
 
 def get_accounts_from_input():
@@ -163,10 +135,10 @@ def get_accounts_from_input():
         raise Exception('Invalid choice')
 
 
-def print_dictionary(region, az_dictionary, max_account_name_length):
+def print_dictionary(region, az_dictionary, all_offerings, max_account_name_length):
     seperator = '+-{}-+{}'.format(
         '-' * max_account_name_length,
-        '---+' * len(az_dictionary.values()[0]),
+        '---+' * len(all_offerings),
     )
 
     # Dump output for this region
@@ -178,7 +150,10 @@ def print_dictionary(region, az_dictionary, max_account_name_length):
         print('| {0:{1}} | {2} |'.format(
             account_name,
             max_account_name_length,
-            ' | '.join(azs),
+            ' | '.join([
+                azs[offering] if offering in azs else '.'
+                for offering in all_offerings
+            ]),
         ))
 
     print(seperator)
@@ -194,38 +169,31 @@ def main():
     if len(accounts) < 2:
         raise Exception('This is only interesting for multiple accounts. Please specify multiple accounts.')
 
-    # Separate first account from the rest
-    first_account, other_accounts = accounts[0], accounts[1:]
-
     # Calculcate the longest account name
     max_account_name_length = max([len(account.name) for account in accounts])
 
     # Get a list of all regions
-    regions = first_account.get_regions()
+    regions = accounts[0].get_regions()
 
     for region in regions:
-        # Get AZs for specific region
-        availability_zones = first_account.get_availabity_zones(region)
 
         # Initialize our dictionary of lists for the current region
         az_dictionary = {
-            account.name: []
+            account.name: account.get_reserved_instances_offerings(region)
             for account in accounts
         }
 
-        for availability_zone in availability_zones:
-            az_dictionary[first_account.name].append(availability_zone[-1:])
+        # Collect all the offering ids, as some accounts may see different AZs then others
+        all_offerings = [
+            offering
+            for offerings in az_dictionary.values()
+            for offering in offerings.keys()
+        ]
 
-            # Get offering ID for the first offering of the first account and find it in the other accounts
-            offering_id = first_account.get_reserved_instances_offering_id(region, availability_zone)
+        # Remove duplicates
+        all_offerings = sorted(list(set(all_offerings)))
 
-            if offering_id is not None:
-                for other_account in other_accounts:
-                    az2 = other_account.get_availability_zone_of_reserved_instance_offering(region, offering_id)
-
-                    az_dictionary[other_account.name].append(az2[-1:] if az2 is not None else '?')
-
-        print_dictionary(region, az_dictionary, max_account_name_length)
+        print_dictionary(region, az_dictionary, all_offerings, max_account_name_length)
 
 
 if __name__ == '__main__':
