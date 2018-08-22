@@ -1,5 +1,6 @@
 #!/bin/python
 import boto3
+from botocore.exceptions import NoCredentialsError
 import json
 
 # Search for reserved instances for this instance type.  Not all AZs have instances of
@@ -12,6 +13,8 @@ OFFERING_TYPE = 'All Upfront'
 PRODUCT_DESCRIPTION = 'Linux/UNIX (Amazon VPC)'
 DURATION = 94608000
 DESCRIBE_REGIONS_ZONE = 'us-east-1'
+
+bad_credential_list = []
 
 class Account:
 
@@ -66,22 +69,30 @@ class Account:
         return sorted(regions)
 
     def get_reserved_instances_offerings(self, region):
-        response = self.get_ec2_client(region).describe_reserved_instances_offerings(
-            IncludeMarketplace=False,
-            InstanceType=INSTANCE_TYPE,
-            InstanceTenancy=INSTANCE_TENANCY,
-            MinDuration=DURATION,
-            MaxDuration=DURATION,
-            OfferingClass=OFFERING_CLASS,
-            OfferingType=OFFERING_TYPE,
-            ProductDescription=PRODUCT_DESCRIPTION,
-        )
+        if self.name in bad_credential_list:
+            return {}
 
-        return {
-            offering['ReservedInstancesOfferingId']: offering['AvailabilityZone'][-1:]
-            for offering in response['ReservedInstancesOfferings']
-            if 'AvailabilityZone' in offering
-        }
+        try:
+            response = self.get_ec2_client(region).describe_reserved_instances_offerings(
+                IncludeMarketplace=False,
+                InstanceType=INSTANCE_TYPE,
+                InstanceTenancy=INSTANCE_TENANCY,
+                MinDuration=DURATION,
+                MaxDuration=DURATION,
+                OfferingClass=OFFERING_CLASS,
+                OfferingType=OFFERING_TYPE,
+                ProductDescription=PRODUCT_DESCRIPTION,
+            )
+
+            return {
+                offering['ReservedInstancesOfferingId']: offering['AvailabilityZone'][-1:]
+                for offering in response['ReservedInstancesOfferings']
+                if 'AvailabilityZone' in offering
+            }
+        except NoCredentialsError:
+            print 'Credentials for account ' + self.name + ' are invalid'
+            bad_credential_list.append(self.name)
+            return {}
 
 
 def get_accounts_from_input():
@@ -184,7 +195,7 @@ def main():
             for account in accounts
         }
 
-        # Collect all the offering ids, as some accounts may see different AZs then others
+        # Collect all the offering ids, as some accounts may see different AZs than others
         all_offerings = [
             offering
             for offerings in az_dictionary.values()
