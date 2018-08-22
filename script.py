@@ -11,7 +11,7 @@ OFFERING_CLASS = 'standard'
 OFFERING_TYPE = 'All Upfront'
 PRODUCT_DESCRIPTION = 'Linux/UNIX (Amazon VPC)'
 DURATION = 94608000
-
+DESCRIBE_REGIONS_ZONE = 'us-east-1'
 
 class Account:
 
@@ -58,7 +58,7 @@ class Account:
         return self.session.client('ec2', region_name=region)
 
     def get_regions(self):
-        response = self.get_ec2_client('us-east-1').describe_regions()
+        response = self.get_ec2_client(DESCRIBE_REGIONS_ZONE).describe_regions()
         regions = [
             region['RegionName']
             for region in response['Regions']
