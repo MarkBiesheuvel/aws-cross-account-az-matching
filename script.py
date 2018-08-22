@@ -131,19 +131,20 @@ def get_accounts_from_input():
             Account(profile_name=profile)
             for profile in session.available_profiles
         ]
+
     else:
         raise Exception('Invalid choice')
 
 
 def print_dictionary(region, az_dictionary, all_offerings, max_account_name_length):
-    seperator = '+-{}-+{}'.format(
+    separator = '+-{}-+{}'.format(
         '-' * max_account_name_length,
         '---+' * len(all_offerings),
     )
 
     # Dump output for this region
     print('Mapping for region {}'.format(region))
-    print(seperator)
+    print(separator)
 
     for account_name in az_dictionary:
         azs = az_dictionary[account_name]
@@ -156,7 +157,7 @@ def print_dictionary(region, az_dictionary, all_offerings, max_account_name_leng
             ]),
         ))
 
-    print(seperator)
+    print(separator)
     print('')
 
 
@@ -169,7 +170,7 @@ def main():
     if len(accounts) < 2:
         raise Exception('This is only interesting for multiple accounts. Please specify multiple accounts.')
 
-    # Calculcate the longest account name
+    # Calculate the longest account name
     max_account_name_length = max([len(account.name) for account in accounts])
 
     # Get a list of all regions
