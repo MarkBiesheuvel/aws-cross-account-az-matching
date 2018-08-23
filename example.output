@@ -1,9 +1,9 @@
 Mapping for region ap-northeast-1
-+-----------------+---+---+---+
-| xxxxxxxxxxxxx   | a | c | d |
-| yyyyyyyyyyyyyyy | a | c | d |
-| zzzzzzzzzzzzz   | a | c | d |
-+-----------------+---+---+---+
++-----------------+---+---+---+---+
+| xxxxxxxxxxxxx   | a | . | c | d |
+| yyyyyyyyyyyyyyy | a | b | c | d |
+| zzzzzzzzzzzzz   | a | . | c | d |
++-----------------+---+---+---+---+
 
 Mapping for region ap-northeast-2
 +-----------------+---+---+

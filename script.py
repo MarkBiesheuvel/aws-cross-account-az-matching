@@ -1,5 +1,6 @@
 #!/bin/python
 import boto3
+from botocore.exceptions import NoCredentialsError
 import json
 
 # Search for reserved instances for this instance type.  Not all AZs have instances of
@@ -11,7 +12,7 @@ OFFERING_CLASS = 'standard'
 OFFERING_TYPE = 'All Upfront'
 PRODUCT_DESCRIPTION = 'Linux/UNIX (Amazon VPC)'
 DURATION = 94608000
-
+DESCRIBE_REGIONS_ZONE = 'us-east-1'
 
 class Account:
 
@@ -22,6 +23,7 @@ class Account:
             self.initialize_by_assume_role(account_id, role_name)
         else:
             raise Exception('Missing parameters for Account')
+        self.valid_credentials = True
 
     def initialize_by_profile_name(self, profile_name):
         # Store account name
@@ -58,7 +60,7 @@ class Account:
         return self.session.client('ec2', region_name=region)
 
     def get_regions(self):
-        response = self.get_ec2_client('us-east-1').describe_regions()
+        response = self.get_ec2_client(DESCRIBE_REGIONS_ZONE).describe_regions()
         regions = [
             region['RegionName']
             for region in response['Regions']
@@ -66,22 +68,30 @@ class Account:
         return sorted(regions)
 
     def get_reserved_instances_offerings(self, region):
-        response = self.get_ec2_client(region).describe_reserved_instances_offerings(
-            IncludeMarketplace=False,
-            InstanceType=INSTANCE_TYPE,
-            InstanceTenancy=INSTANCE_TENANCY,
-            MinDuration=DURATION,
-            MaxDuration=DURATION,
-            OfferingClass=OFFERING_CLASS,
-            OfferingType=OFFERING_TYPE,
-            ProductDescription=PRODUCT_DESCRIPTION,
-        )
+        if not self.valid_credentials:
+            return {}
 
-        return {
-            offering['ReservedInstancesOfferingId']: offering['AvailabilityZone'][-1:]
-            for offering in response['ReservedInstancesOfferings']
-            if 'AvailabilityZone' in offering
-        }
+        try:
+            response = self.get_ec2_client(region).describe_reserved_instances_offerings(
+                IncludeMarketplace=False,
+                InstanceType=INSTANCE_TYPE,
+                InstanceTenancy=INSTANCE_TENANCY,
+                MinDuration=DURATION,
+                MaxDuration=DURATION,
+                OfferingClass=OFFERING_CLASS,
+                OfferingType=OFFERING_TYPE,
+                ProductDescription=PRODUCT_DESCRIPTION,
+            )
+
+            return {
+                offering['ReservedInstancesOfferingId']: offering['AvailabilityZone'][-1:]
+                for offering in response['ReservedInstancesOfferings']
+                if 'AvailabilityZone' in offering
+            }
+        except NoCredentialsError:
+            print 'Credentials for account ' + self.name + ' are invalid'
+            self.valid_credentials = False
+            return {}
 
 
 def get_accounts_from_input():
@@ -131,19 +141,20 @@ def get_accounts_from_input():
             Account(profile_name=profile)
             for profile in session.available_profiles
         ]
+
     else:
         raise Exception('Invalid choice')
 
 
 def print_dictionary(region, az_dictionary, all_offerings, max_account_name_length):
-    seperator = '+-{}-+{}'.format(
+    separator = '+-{}-+{}'.format(
         '-' * max_account_name_length,
         '---+' * len(all_offerings),
     )
 
     # Dump output for this region
     print('Mapping for region {}'.format(region))
-    print(seperator)
+    print(separator)
 
     for account_name in az_dictionary:
         azs = az_dictionary[account_name]
@@ -156,7 +167,7 @@ def print_dictionary(region, az_dictionary, all_offerings, max_account_name_leng
             ]),
         ))
 
-    print(seperator)
+    print(separator)
     print('')
 
 
@@ -169,7 +180,7 @@ def main():
     if len(accounts) < 2:
         raise Exception('This is only interesting for multiple accounts. Please specify multiple accounts.')
 
-    # Calculcate the longest account name
+    # Calculate the longest account name
     max_account_name_length = max([len(account.name) for account in accounts])
 
     # Get a list of all regions
@@ -183,7 +194,7 @@ def main():
             for account in accounts
         }
 
-        # Collect all the offering ids, as some accounts may see different AZs then others
+        # Collect all the offering ids, as some accounts may see different AZs than others
         all_offerings = [
             offering
             for offerings in az_dictionary.values()
