@@ -14,8 +14,6 @@ PRODUCT_DESCRIPTION = 'Linux/UNIX (Amazon VPC)'
 DURATION = 94608000
 DESCRIBE_REGIONS_ZONE = 'us-east-1'
 
-bad_credential_list = []
-
 class Account:
 
     def __init__(self, account_id=None, role_name=None, profile_name=None):
@@ -25,6 +23,7 @@ class Account:
             self.initialize_by_assume_role(account_id, role_name)
         else:
             raise Exception('Missing parameters for Account')
+        self.valid_credentials = True
 
     def initialize_by_profile_name(self, profile_name):
         # Store account name
@@ -69,7 +68,7 @@ class Account:
         return sorted(regions)
 
     def get_reserved_instances_offerings(self, region):
-        if self.name in bad_credential_list:
+        if not self.valid_credentials:
             return {}
 
         try:
@@ -91,7 +90,7 @@ class Account:
             }
         except NoCredentialsError:
             print 'Credentials for account ' + self.name + ' are invalid'
-            bad_credential_list.append(self.name)
+            self.valid_credentials = False
             return {}
 
 
